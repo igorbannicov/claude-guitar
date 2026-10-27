@@ -20,6 +20,7 @@ Claude не считает лады и натяжение «из головы»,
 | SVG-шаблон накладки 1:1 | `/guitar:template` | `/guitar:template 25.5 --bass 27 --perp 8 --a4` |
 | Аккорд → таблатура и диаграммы | `/guitar:chord` | `/guitar:chord Abm7+9 --svg Abm9.svg` |
 | Аккорды для укулеле | `/guitar:chord` | `/guitar:chord F --instrument ukulele` |
+| Аккорды песни | `/guitar:song` | `/guitar:song кино кукушка --easy` |
 | Журнал сборки | `/guitar:build` | `/guitar:build new "Tele #2"` |
 
 Команды не обязательны: скилл `guitar` срабатывает и на обычный вопрос —
@@ -119,6 +120,39 @@ F: F(1)  A(3)  C(5)
 Ступени со `?` можно опускать (квинта в септаккордах, нона в 11/13). Ограничения перебора: окно 4 лада,
 не больше 4 пальцев (барре — один), открытые струны — только у порожка, нижняя нота — тоника или бас.
 
+## Аккорды песни
+
+«Дай аккорды на Кукушку Цоя» — скрипт ищет песню на [akkords.pro](https://akkords.pro) и выдаёт аккорды по секциям
+и диаграммы всех аккордов. **Текст песни не выводится** — он защищён авторским правом, за ним по ссылке.
+
+```
+$ guitar.py song "кино кукушка"
+Кукушка: аккорды для гитары
+https://akkords.pro/songs/kino/kukushka/
+
+Вступление:
+  Am C G G (x4)
+
+Куплет 1:
+  Am
+  G Dm
+  Am  ×2
+  G Dm
+  Am
+
+Припев:
+  G F Am  ×4
+...
+Аккорды (5): Am  C  G  Dm  F
+```
+
+- `--transpose -2` — под голос; `--capo 3` или `--easy` — подобрать каподастр так, чтобы аккорды были открытыми;
+- `--instrument ukulele` — диаграммы для укулеле;
+- `--url` — конкретная страница akkords.pro вместо поиска.
+
+Один запрос на просьбу пользователя, честный User-Agent, `robots.txt` проверяется перед загрузкой.
+Сайты, которые запрещают ботов (amdm.ru, mychords.net, e-chords, Ultimate Guitar), плагин не трогает.
+
 ## Шаблон для печати
 
 `guitar.py svg 25.5 -o board.svg` — один SVG в натуральную величину (для плоттера, лазера, ЧПУ;
@@ -172,6 +206,7 @@ stdlib-only Python script:
 - **neck** — neck angle and neck projection;
 - **svg** — 1:1 fretboard template, single sheet or tiled A4 pages with glue lines and a 100 mm check ruler;
 - **chord** — chord symbol to tab and chord-box diagrams (text or SVG) (`Abm7+9`, `F#m7b5`, `G/B`…), best voicing per neck position, any tuning, ukulele presets (`--instrument ukulele`);
+- **song** — chords of a song from akkords.pro by section (lyrics are never printed, link only), transpose, capo finder, diagrams;
 - **build log** — Markdown spec + dated notes per build.
 
 Install: `/plugin marketplace add igorbannicov/claude-guitar`, then `/plugin install guitar@claude-guitar`.

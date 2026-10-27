@@ -9,9 +9,13 @@ python guitar.py chord Abm7+9 [--count 4] [--tuning "D4 A3 F3 C3 G2 C2"]
 Мензура: дюймы (25.5) или миллиметры (648mm).
 """
 import argparse
+import html
 import itertools
 import math
 import re
+import urllib.parse
+import urllib.request
+import urllib.robotparser
 
 # D'Addario String Tension Specifications (tension_chart_13934.pdf), lb/in.
 # PL — plain steel, NW — XL nickelplated steel round wound.
@@ -415,8 +419,11 @@ def diagram_frame(v):
     return start, max(4, max(fretted, default=0) - start + 1)
 
 
-def text_diagrams(vs):
+def text_diagrams(vs, names=None):
     """Диаграммы аккорда псевдографикой: струны слева направо от басовой."""
+    if names:
+        width = 2 * len(vs[0]) + 2
+        print("   " + "   ".join(f"{n:^{width}}" for n in names))
     blocks = []
     for v in vs:
         v = v[::-1]
@@ -508,16 +515,22 @@ def voicings(open_midi, root_pc, bass_pc, tones, optional, max_fret=15, span=4):
     return [v for _, v in sorted(best.values(), key=lambda sv: -sv[0])]
 
 
+def chord_voicings(sym, open_midi):
+    root, bass, tones, optional = parse_chord(sym)
+    reentrant = open_midi != sorted(open_midi, reverse=True)  # укулеле GCEA: бас не на 4-й струне
+    bpc = None if reentrant else pitch_class(bass)
+    return root, tones, optional, voicings(open_midi, pitch_class(root), bpc, tones, optional)
+
+
 def chord(args):
     tuning = (args.tuning or INSTRUMENTS[args.instrument]).split()
     open_midi = [note_midi(n) for n in tuning]
-    root, bass, tones, optional = parse_chord(args.chord)
-    rpc, bpc = pitch_class(root), pitch_class(bass)
+    reentrant = open_midi != sorted(open_midi, reverse=True)
+    root, tones, optional, vs = chord_voicings(args.chord, open_midi)
     order = sorted(tones.items(), key=lambda dv: int(dv[0]))
     print(f"{args.chord}: " + "  ".join(
         f"{spell(root, d, v)}({interval_label(d, v)}{'?' if d in optional else ''})" for d, v in order))
-    reentrant = open_midi != sorted(open_midi, reverse=True)  # укулеле GCEA: бас не на 4-й струне
-    vs = voicings(open_midi, rpc, None if reentrant else bpc, tones, optional)[:args.count]
+    vs = vs[:args.count]
     if not vs:
         raise SystemExit("Удобной аппликатуры в 4 ладах не нашлось")
     compact = ["-".join("x" if f is None else str(f) for f in reversed(v)) for v in vs]
@@ -533,6 +546,105 @@ def chord(args):
     if args.svg:
         svg_diagrams(args.chord, vs, args.svg)
 
+
+SITE = "https://akkords.pro"
+AGENT = "claude-guitar/0.6 (+https://github.com/igorbannicov/claude-guitar)"
+EASY = {"C", "A", "G", "E", "D", "Am", "Em", "Dm", "A7", "E7", "D7", "G7", "C7", "B7", "Am7", "Em7", "Dm7",
+        "Cmaj7", "Fmaj7", "Asus2", "Asus4", "Dsus2", "Dsus4", "Esus4", "Cadd9"}
+
+
+def fetch(url):
+    """Одна страница по запросу пользователя, с уважением к robots.txt."""
+    rp = urllib.robotparser.RobotFileParser(SITE + "/robots.txt")
+    rp.read()
+    if not rp.can_fetch(AGENT, url):
+        raise SystemExit(f"robots.txt сайта запрещает загрузку {url}")
+    req = urllib.request.Request(url, headers={"User-Agent": AGENT})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def split_chord(sym):
+    m = re.fullmatch(r"([A-H][#b]?)(.*?)(?:/([A-H][#b]?))?", sym)
+    if not m:
+        return None
+    fix = lambda n: n and ("B" + n[1:] if n[0] == "H" else n)  # H — немецкое/русское B
+    return fix(m[1]), m[2], fix(m[3])
+
+
+def transpose(sym, n):
+    root, rest, bass = split_chord(sym)
+    shift = lambda r: NOTES_BY_PC[(pitch_class(r) + n) % 12]
+    return shift(root) + rest + ("/" + shift(bass) if bass else "")
+
+
+def song_sections(page):
+    """Секции песни: [(название, [строки аккордов])] — без текста песни."""
+    m = re.search(r'<p class="chords">(.*?)</p>', page, re.S)
+    if not m:
+        raise SystemExit("На странице не нашёл блока с аккордами")
+    sections = [("", [])]
+    for line in m[1].split("\n"):
+        if lab := re.search(r"<b>(.*?):?</b>", line):
+            sections.append((html.unescape(lab[1]).rstrip(":"), []))
+        chords = [c for s in re.findall(r"<span>(.*?)</span>", line) for c in html.unescape(s).split()]
+        chords = [c for c in chords if split_chord(c)]
+        if chords:
+            rep = re.search(r"\}\s*(x\d+)", line)
+            sections[-1][1].append(" ".join(chords) + (f"  ({rep[1]})" if rep else ""))
+    return [s for s in sections if s[1]]
+
+
+def song(args):
+    if args.url:
+        url = args.url
+    else:
+        found = fetch(f"{SITE}/?s={urllib.parse.quote(args.query)}")
+        links = list(dict.fromkeys(re.findall(rf'href="({SITE}/songs/[^/"]+/[^/"]+/)"', found)))
+        if not links:
+            raise SystemExit(f"На {SITE} ничего не нашлось по запросу «{args.query}»")
+        url = links[0]
+        if len(links) > 1:
+            print("Ещё варианты: " + "  ".join(links[1:5]))
+    page = fetch(url)
+    title = re.search(r"<h1[^>]*>(.*?)</h1>", page, re.S)
+    sections = song_sections(page)
+    shift = args.transpose
+    order = list(dict.fromkeys(c for _, lines in sections for line in lines for c in line.split()
+                               if split_chord(c)))
+    if args.capo is not None or args.easy:
+        capos = range(0, 8) if args.capo is None else [args.capo]
+        capo = max(capos, key=lambda k: (sum(transpose(c, shift - k) in EASY for c in order), -k))
+    else:
+        capo = 0
+    print(re.sub(r"<[^>]+>", "", html.unescape(title[1])).strip() if title else url)
+    print(url)
+    if shift or capo:
+        print(f"Транспонирование {shift:+d}" * bool(shift) + (", " if shift and capo else "")
+              + (f"каподастр на {capo}-й лад, аппликатуры ниже — относительно капо" if capo else ""))
+    t = lambda line: " ".join(transpose(c, shift - capo) if split_chord(c) else c for c in line.split())
+    for name, lines in sections:
+        print(f"\n{name or 'Начало'}:")
+        for line, run in itertools.groupby(lines):  # одинаковые строки подряд — одной с повтором
+            n = len(list(run))
+            print("  " + t(line) + (f"  ×{n}" if n > 1 else ""))
+    shapes = list(dict.fromkeys(transpose(c, shift - capo) for c in order))
+    tuning = (args.tuning or INSTRUMENTS[args.instrument]).split()
+    open_midi = [note_midi(n) for n in tuning]
+    best, names = [], []
+    for c in shapes:
+        try:
+            vs = chord_voicings(c, open_midi)[3]
+        except SystemExit:
+            vs = []
+        if vs:
+            best.append(vs[0])
+            names.append(c)
+    print(f"\nАккорды ({len(shapes)}): " + "  ".join(shapes))
+    for i in range(0, len(best), 6):
+        print()
+        text_diagrams(best[i:i + 6], names[i:i + 6])
+    print("\nТекст песни — по ссылке выше.")
 
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 sub = p.add_subparsers(required=True)
@@ -592,6 +704,16 @@ c.add_argument("--instrument", choices=INSTRUMENTS, default="guitar", help="го
 c.add_argument("--tuning", help="свой строй от 1-й струны, например low-G укулеле: \"A4 E4 C4 G3\"")
 c.add_argument("--svg", help="сохранить диаграммы картинкой в этот .svg")
 c.set_defaults(fn=chord)
+
+so = sub.add_parser("song", help="аккорды песни с akkords.pro (без текста)")
+so.add_argument("query", nargs="?", help='поиск: "кино кукушка"')
+so.add_argument("--url", help="прямая ссылка на песню на akkords.pro")
+so.add_argument("--transpose", type=int, default=0, help="сдвиг в полутонах: +2, -3")
+so.add_argument("--capo", type=int, help="каподастр на этот лад")
+so.add_argument("--easy", action="store_true", help="подобрать капо для самых простых аккордов")
+so.add_argument("--instrument", choices=INSTRUMENTS, default="guitar")
+so.add_argument("--tuning", help="свой строй от 1-й струны")
+so.set_defaults(fn=song)
 
 a = p.parse_args()
 a.fn(a)
