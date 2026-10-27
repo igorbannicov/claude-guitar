@@ -39,6 +39,7 @@ MM = 25.4
 LB_KG = 0.45359237
 NOTES = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 STANDARD = "E4 B3 G3 D3 A2 E2 B1 F#1".split()
+INSTRUMENTS = {"guitar": "E4 B3 G3 D3 A2 E2", "ukulele": "A4 E4 C4 G4", "baritone-ukulele": "E4 B3 G3 D3"}
 INLAYS = (3, 5, 7, 9, 12, 15, 17, 19, 21, 24)
 
 
@@ -485,7 +486,7 @@ def voicings(open_midi, root_pc, bass_pc, tones, optional, max_fret=15, span=4):
             if len(sound) < min(len(open_midi), max(3, len(required))):
                 continue
             got = {m % 12 for m, _ in sound}
-            if not required <= got or min(sound)[0] % 12 != bass_pc:
+            if not required <= got or (bass_pc is not None and min(sound)[0] % 12 != bass_pc):
                 continue
             fretted = [f for f in v if f]
             low = min(fretted, default=0)
@@ -499,7 +500,8 @@ def voicings(open_midi, root_pc, bass_pc, tones, optional, max_fret=15, span=4):
             idx = [i for _, i in sound]
             gaps = sum(1 for i in range(min(idx), max(idx)) if v[i] is None)
             score = (len(sound) - 1.5 * gaps - 0.5 * (len(open_midi) - len(sound)) + v.count(0) - 0.5 * fingers
-                     - 0.4 * low - 0.75 * (max(fretted, default=0) - low) + 0.5 * len(got))
+                     - 0.4 * low - 0.75 * (max(fretted, default=0) - low) + 0.5 * len(got)
+                     - 1.5 * (v[0] is None))  # глушить 1-ю струну неудобно
             key = "open" if 0 in v else low  # из открытых — только лучшая
             if score > best.get(key, (-99, None))[0]:
                 best[key] = (score, v)
@@ -507,24 +509,25 @@ def voicings(open_midi, root_pc, bass_pc, tones, optional, max_fret=15, span=4):
 
 
 def chord(args):
-    tuning = args.tuning.split() if args.tuning else STANDARD[:6]
+    tuning = (args.tuning or INSTRUMENTS[args.instrument]).split()
     open_midi = [note_midi(n) for n in tuning]
     root, bass, tones, optional = parse_chord(args.chord)
     rpc, bpc = pitch_class(root), pitch_class(bass)
     order = sorted(tones.items(), key=lambda dv: int(dv[0]))
     print(f"{args.chord}: " + "  ".join(
         f"{spell(root, d, v)}({interval_label(d, v)}{'?' if d in optional else ''})" for d, v in order))
-    vs = voicings(open_midi, rpc, bpc, tones, optional)[:args.count]
+    reentrant = open_midi != sorted(open_midi, reverse=True)  # укулеле GCEA: бас не на 4-й струне
+    vs = voicings(open_midi, rpc, None if reentrant else bpc, tones, optional)[:args.count]
     if not vs:
         raise SystemExit("Удобной аппликатуры в 4 ладах не нашлось")
     compact = ["-".join("x" if f is None else str(f) for f in reversed(v)) for v in vs]
     w = max(8, max(map(len, compact)) + 2)
     print("   " + "".join(f"{'откр.' if 0 in v else min(f for f in v if f)!s:^{w}}" for v in vs))
     for i, n in enumerate(tuning):
-        lab = n[:-1].upper() if i == len(tuning) - 1 else n[:-1].lower()
+        lab = n[:-1].upper() if i == len(tuning) - 1 and not reentrant else n[:-1].lower()
         print(f"{lab:>2}|" + "".join(f"{'x' if v[i] is None else v[i]!s:-^{w - 1}}|" for v in vs))
     print("   " + "".join(f"{c:^{w}}" for c in compact))
-    print("Сверху — позиция (нижний лад), снизу — запись от басовой струны." + (" ? — ступень можно опустить." if optional else ""))
+    print("Сверху — позиция (нижний лад), снизу — запись от последней струны к 1-й." + (" ? — ступень можно опустить." if optional else ""))
     print()
     text_diagrams(vs)
     if args.svg:
@@ -585,7 +588,8 @@ s.set_defaults(fn=svg)
 c = sub.add_parser("chord", help="аппликатуры аккорда")
 c.add_argument("chord", help="Am, C7, Abm7+9, F#m7b5, Cmaj9, G/B, Dsus4, E7#9")
 c.add_argument("--count", type=int, default=4, help="сколько вариантов показать")
-c.add_argument("--tuning", help="строй от 1-й струны (по умолчанию E-standard)")
+c.add_argument("--instrument", choices=INSTRUMENTS, default="guitar", help="готовый строй")
+c.add_argument("--tuning", help="свой строй от 1-й струны, например low-G укулеле: \"A4 E4 C4 G3\"")
 c.add_argument("--svg", help="сохранить диаграммы картинкой в этот .svg")
 c.set_defaults(fn=chord)
 

@@ -16,6 +16,7 @@ description: Расчёты для гитаростроения — положе
 | Угол грифа | `neck 24.75 --saddle 19 --board-height 6 --joint-fret 16 [--fret 1.2 --action 1.6]` |
 | Шаблон 1:1 | `svg 25.5 [--bass 27 --perp 8] [--a4] -o fretboard.svg` |
 | Аккорд → таб и диаграммы | `chord Abm7+9 [--count 4] [--tuning "D4 A3 F3 C3 G2 C2"] [--svg Abm9.svg]` |
+| Укулеле | `chord F --instrument ukulele` (также `baritone-ukulele`; low-G — `--tuning "A4 E4 C4 G3"`) |
 
 Соглашения:
 - Мензура в дюймах (`25.5`) или мм (`648mm`). Типовые: Fender 25.5″, Gibson 24.75″, PRS 25″, баритон 27″. Ширины и высоты — мм, радиус — дюймы.
