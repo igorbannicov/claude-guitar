@@ -395,6 +395,83 @@ def spell(root, degree, semi):
     return letter + {-1: "b", 0: "", 1: "#"}[diff]
 
 
+def barre(v):
+    """(лад, сколько струн под пальцем, первая, последняя) или None."""
+    fretted = [f for f in v if f]
+    if not fretted:
+        return None
+    low = min(fretted)
+    at = [i for i, f in enumerate(v) if f == low]
+    if len(at) < 2 or {0, None} & set(v[at[0]:at[-1] + 1]):
+        return None
+    return low, len(at), at[0], at[-1]
+
+
+def diagram_frame(v):
+    """Первый показанный лад и число ладов в диаграмме."""
+    fretted = [f for f in v if f]
+    start = 1 if not fretted or max(fretted) <= 4 else min(fretted)
+    return start, max(4, max(fretted, default=0) - start + 1)
+
+
+def text_diagrams(vs):
+    """Диаграммы аккорда псевдографикой: струны слева направо от басовой."""
+    blocks = []
+    for v in vs:
+        v = v[::-1]
+        start, rows = diagram_frame(v)
+        lines = [" ".join("x" if f is None else "o" if f == 0 else " " for f in v) + "   ",
+                 ("═" if start == 1 else "─") * (2 * len(v) - 1) + "   "]
+        for r in range(start, start + rows):
+            lines.append(" ".join("●" if f == r else "│" for f in v) + (f" {start:<2}" if r == start and start > 1 else "   "))
+        blocks.append(lines)
+    for row in zip(*[b + [" " * len(b[0])] * (max(map(len, blocks)) - len(b)) for b in blocks]):
+        print("   " + "   ".join(row))
+
+
+def svg_diagrams(name, vs, path):
+    """Диаграммы аккорда картинкой, как в аккордниках."""
+    sx, fy, x0, y0, cell = 14, 18, 22, 34, 110
+    els = []
+    for k, v in enumerate(vs):
+        v = v[::-1]
+        n = len(v)
+        ox = k * cell
+        start, rows = diagram_frame(v)
+        right = ox + x0 + sx * (n - 1)
+        for i in range(n):
+            x = ox + x0 + sx * i
+            els.append(f'<line x1="{x}" y1="{y0}" x2="{x}" y2="{y0 + fy * rows}" class="l"/>')
+            f = v[i]
+            if f is None:
+                els.append(f'<path d="M{x - 4},{y0 - 14}l8,8m0,-8l-8,8" class="l"/>')
+            elif f == 0:
+                els.append(f'<circle cx="{x}" cy="{y0 - 10}" r="4" class="o"/>')
+        for r in range(rows + 1):
+            y = y0 + fy * r
+            els.append(f'<line x1="{ox + x0}" y1="{y}" x2="{right}" y2="{y}" class="{"n" if r == 0 and start == 1 else "l"}"/>')
+        if start > 1:
+            els.append(f'<text x="{ox + x0 - 6}" y="{y0 + fy * 0.5 + 4}" class="t" style="text-anchor:end">{start}fr</text>')
+        b = barre(v)
+        if b:
+            fb, _, i1, i2 = b
+            y = y0 + fy * (fb - start + 0.5)
+            els.append(f'<rect x="{ox + x0 + sx * i1 - 5}" y="{y - 5}" width="{sx * (i2 - i1) + 10}" height="10" rx="5" class="d"/>')
+        for i, f in enumerate(v):
+            if f and not (b and f == b[0]):
+                els.append(f'<circle cx="{ox + x0 + sx * i}" cy="{y0 + fy * (f - start + 0.5)}" r="5" class="d"/>')
+        els.append(f'<text x="{(ox + x0 + right) / 2}" y="{y0 + fy * rows + 20}" class="t b">{name}</text>')
+    h = y0 + fy * 4 + 30
+    style = ("<style>.l{stroke:#000;stroke-width:1;fill:none}.n{stroke:#000;stroke-width:4}"
+             ".o{fill:none;stroke:#000;stroke-width:1.3}.d{fill:#4a5bd0}"
+             ".t{font:12px sans-serif;text-anchor:middle}.b{font-weight:bold;font-size:15px}</style>")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(f'<svg xmlns="http://www.w3.org/2000/svg" width="{cell * len(vs)}" height="{h}" '
+                 f'viewBox="0 0 {cell * len(vs)} {h}">{style}<rect width="100%" height="100%" fill="#fff"/>'
+                 f'{"".join(els)}</svg>\n')
+    print(path)
+
+
 def voicings(open_midi, root_pc, bass_pc, tones, optional, max_fret=15, span=4):
     """Перебор аппликатур в окне span ладов (+ открытые струны); лучшая на каждую позицию."""
     pcs = {(root_pc + v) % 12 for v in tones.values()}
@@ -415,9 +492,8 @@ def voicings(open_midi, root_pc, bass_pc, tones, optional, max_fret=15, span=4):
             if fretted and max(fretted) - low >= span:
                 continue
             fingers = len(fretted)
-            at_low = [i for i, f in enumerate(v) if f and f == low]
-            if len(at_low) > 1 and 0 not in v[min(at_low):max(at_low) + 1]:
-                fingers -= len(at_low) - 1  # барре
+            if b := barre(v):
+                fingers -= b[1] - 1
             if fingers > 4 or (0 in v and max(fretted, default=0) > 5):  # открытые — только у порожка
                 continue
             idx = [i for _, i in sound]
@@ -449,6 +525,10 @@ def chord(args):
         print(f"{lab:>2}|" + "".join(f"{'x' if v[i] is None else v[i]!s:-^{w - 1}}|" for v in vs))
     print("   " + "".join(f"{c:^{w}}" for c in compact))
     print("Сверху — позиция (нижний лад), снизу — запись от басовой струны." + (" ? — ступень можно опустить." if optional else ""))
+    print()
+    text_diagrams(vs)
+    if args.svg:
+        svg_diagrams(args.chord, vs, args.svg)
 
 
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -506,6 +586,7 @@ c = sub.add_parser("chord", help="аппликатуры аккорда")
 c.add_argument("chord", help="Am, C7, Abm7+9, F#m7b5, Cmaj9, G/B, Dsus4, E7#9")
 c.add_argument("--count", type=int, default=4, help="сколько вариантов показать")
 c.add_argument("--tuning", help="строй от 1-й струны (по умолчанию E-standard)")
+c.add_argument("--svg", help="сохранить диаграммы картинкой в этот .svg")
 c.set_defaults(fn=chord)
 
 a = p.parse_args()

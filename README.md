@@ -18,7 +18,7 @@ Claude не считает лады и натяжение «из головы»,
 | Подбор калибров под строй | `/guitar:gauges` | `/guitar:gauges 24.75 "D4 A3 F3 C3 G2 C2" --match "10 13 17 26w 36w 46w"` |
 | Угол грифа к корпусу | `/guitar:neck` | `/guitar:neck 24.75 --saddle 19 --board-height 6 --joint-fret 16` |
 | SVG-шаблон накладки 1:1 | `/guitar:template` | `/guitar:template 25.5 --bass 27 --perp 8 --a4` |
-| Аккорд → таблатура | `/guitar:chord` | `/guitar:chord Abm7+9` |
+| Аккорд → таблатура и диаграммы | `/guitar:chord` | `/guitar:chord Abm7+9 --svg Abm9.svg` |
 | Журнал сборки | `/guitar:build` | `/guitar:build new "Tele #2"` |
 
 Команды не обязательны: скилл `guitar` срабатывает и на обычный вопрос —
@@ -74,6 +74,21 @@ Abm7+9: Ab(1)  Cb(b3)  Eb(5?)  Gb(b7)  Bb(9)
  E|-----4------|-----4------|-----4------|-----4------|
     4-1-1-1-0-2  4-6-4-4-4-6  4-2-x-3-4-2  4-1-1-4-x-2
 ```
+
+Под табом — те же аппликатуры диаграммами (псевдографика, струны слева направо от басовой):
+
+```
+   x o       o                                 x          x     x
+   ═══════════      ───────────      ───────────      ───────────
+   │ │ │ │ ● │      ● │ │ ● ● ● 5    │ │ ● ● │ │ 2    │ ● │ │ │ │ 3
+   │ │ ● ● │ │      │ │ │ │ │ │      │ ● │ │ │ │      │ │ │ │ │ │
+   │ │ │ │ │ │      │ ● ● │ │ │      │ │ │ │ │ │      ● │ │ ● ● │
+   │ │ │ │ │ │      │ │ │ │ │ │      ● │ │ │ ● │      │ │ │ │ │ │
+```
+
+С `--svg Abm9.svg` — картинкой, как в аккорднике (с барре):
+
+![Abm7+9](docs/chord-Abm7+9.svg)
 
 Понимает `m`, `maj7`/`Δ`, `7`, `9`, `11`, `13`, `6`, `6/9`, `dim`/`°`, `dim7`, `m7b5`/`ø`, `aug`/`+`, `sus2`/`sus4`, `5`,
 добавленные ступени (`add9`, `+9`), альтерации (`b5 #5 b9 #9 #11 b13`), `no5` и бас через слэш (`G/B`).
@@ -133,7 +148,7 @@ stdlib-only Python script:
 - **gauges** — pick a set for a tuning: target tension or "feel like 10–46 in standard";
 - **neck** — neck angle and neck projection;
 - **svg** — 1:1 fretboard template, single sheet or tiled A4 pages with glue lines and a 100 mm check ruler;
-- **chord** — chord symbol to tab (`Abm7+9`, `F#m7b5`, `G/B`…), best voicing per neck position, any tuning;
+- **chord** — chord symbol to tab and chord-box diagrams (text or SVG) (`Abm7+9`, `F#m7b5`, `G/B`…), best voicing per neck position, any tuning;
 - **build log** — Markdown spec + dated notes per build.
 
 Install: `/plugin marketplace add igorbannicov/claude-guitar`, then `/plugin install guitar@claude-guitar`.
