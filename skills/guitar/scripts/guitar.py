@@ -578,6 +578,16 @@ def transpose(sym, n):
     return shift(root) + rest + ("/" + shift(bass) if bass else "")
 
 
+# фамилия -> группа: на сайте песни лежат под названием группы
+ALIASES = {"цой": "кино", "шевчук": "ддт", "кинчев": "алиса", "бутусов": "наутилус", "гребенщиков": "аквариум",
+           "бг": "аквариум", "летов": "гражданская", "шахрин": "чайф", "макаревич": "машина"}
+
+
+def search(query):
+    found = fetch(f"{SITE}/?s={urllib.parse.quote(query)}")
+    return list(dict.fromkeys(re.findall(rf'href="({SITE}/songs/[^/"]+/[^/"]+/)"', found)))
+
+
 def song_sections(page):
     """Секции песни: [(название, [строки аккордов])] — без текста песни."""
     m = re.search(r'<p class="chords">(.*?)</p>', page, re.S)
@@ -596,13 +606,18 @@ def song_sections(page):
 
 
 def song(args):
+    if not args.url and not args.query:
+        raise SystemExit("Нужен поиск (кино кукушка) или --url")
     if args.url:
         url = args.url
     else:
-        found = fetch(f"{SITE}/?s={urllib.parse.quote(args.query)}")
-        links = list(dict.fromkeys(re.findall(rf'href="({SITE}/songs/[^/"]+/[^/"]+/)"', found)))
+        words = [ALIASES.get(w, w) for w in re.findall(r"\w+", " ".join(args.query).lower())]
+        links = search(" ".join(words))
+        if not links:  # поиск сайта ищет фразу целиком: пробуем по словам
+            hits = [link for w in sorted(words, key=len, reverse=True) for link in search(w)]
+            links = sorted(dict.fromkeys(hits), key=lambda link: -hits.count(link))
         if not links:
-            raise SystemExit(f"На {SITE} ничего не нашлось по запросу «{args.query}»")
+            raise SystemExit(f"На {SITE} ничего не нашлось по запросу «{' '.join(args.query)}»")
         url = links[0]
         if len(links) > 1:
             print("Ещё варианты: " + "  ".join(links[1:5]))
@@ -706,7 +721,7 @@ c.add_argument("--svg", help="сохранить диаграммы картин
 c.set_defaults(fn=chord)
 
 so = sub.add_parser("song", help="аккорды песни с akkords.pro (без текста)")
-so.add_argument("query", nargs="?", help='поиск: "кино кукушка"')
+so.add_argument("query", nargs="*", help="поиск: кино кукушка")
 so.add_argument("--url", help="прямая ссылка на песню на akkords.pro")
 so.add_argument("--transpose", type=int, default=0, help="сдвиг в полутонах: +2, -3")
 so.add_argument("--capo", type=int, help="каподастр на этот лад")
