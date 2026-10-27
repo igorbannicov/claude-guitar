@@ -1,0 +1,9 @@
+{
+  "name": "guitar",
+  "version": "0.2.0",
+  "description": "Luthier calculator: fret positions, multiscale, string tension, gauge picker, neck angle, 1:1 SVG fretboard template, build log",
+  "author": { "name": "igorbannicov" },
+  "repository": "https://github.com/igorbannicov/claude-guitar",
+  "license": "MIT",
+  "keywords": ["guitar", "luthier", "frets", "string-tension"]
+}

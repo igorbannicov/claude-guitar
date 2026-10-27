@@ -1,0 +1,7 @@
+{
+  "name": "claude-guitar",
+  "owner": { "name": "igorbannicov" },
+  "plugins": [
+    { "name": "guitar", "source": "./", "description": "Luthier calculator: frets, multiscale, string tension, gauges, neck angle, SVG fretboard template" }
+  ]
+}
