@@ -16,6 +16,7 @@ import re
 import urllib.parse
 import urllib.request
 import urllib.robotparser
+import webbrowser
 
 # D'Addario String Tension Specifications (tension_chart_13934.pdf), lb/in.
 # PL — plain steel, NW — XL nickelplated steel round wound.
@@ -659,7 +660,11 @@ def song(args):
     for i in range(0, len(best), 6):
         print()
         text_diagrams(best[i:i + 6], names[i:i + 6])
-    print("\nТекст песни — по ссылке выше.")
+    if args.open:
+        webbrowser.open(url)
+        print("\nСтраница с текстом открыта в браузере.")
+    else:
+        print("\nТекст песни — по ссылке выше (или --open, чтобы открыть в браузере).")
 
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 sub = p.add_subparsers(required=True)
@@ -728,6 +733,7 @@ so.add_argument("--capo", type=int, help="каподастр на этот ла�
 so.add_argument("--easy", action="store_true", help="подобрать капо для самых простых аккордов")
 so.add_argument("--instrument", choices=INSTRUMENTS, default="guitar")
 so.add_argument("--tuning", help="свой строй от 1-й струны")
+so.add_argument("--open", action="store_true", help="открыть страницу с текстом в браузере")
 so.set_defaults(fn=song)
 
 a = p.parse_args()

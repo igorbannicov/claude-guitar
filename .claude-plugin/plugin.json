@@ -1,6 +1,6 @@
 {
   "name": "guitar",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Luthier calculator: fret positions, multiscale, string tension, gauge picker, neck angle, 1:1 SVG fretboard template, chord tabs, song chords, build log",
   "author": { "name": "igorbannicov" },
   "repository": "https://github.com/igorbannicov/claude-guitar",
