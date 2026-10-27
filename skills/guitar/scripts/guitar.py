@@ -5,9 +5,11 @@ python guitar.py tension 25.5 "E4 B3 G3 D3 A2 E2" "10 13 17 26w 36w 46w"
 python guitar.py gauges 25.5 "D4 A3 F3 C3 G2 C2" --target 16  |  --match "10 13 17 26w 36w 46w"
 python guitar.py neck 24.75 --saddle 19 --board-height 6 --joint-fret 16
 python guitar.py svg 25.5 [--bass 27 --perp 8] [--a4] -o fretboard.svg
+python guitar.py chord Abm7+9 [--count 4] [--tuning "D4 A3 F3 C3 G2 C2"]
 Мензура: дюймы (25.5) или миллиметры (648mm).
 """
 import argparse
+import itertools
 import math
 import re
 
@@ -50,13 +52,16 @@ def fret_x(L, n):
     return L - L / 2 ** (n / 12)
 
 
-def note_hz(note):
+def note_midi(note):
     m = re.fullmatch(r"([A-Ga-g])([#b]?)(-?\d)", note)
     if not m:
         raise SystemExit(f"Не понял ноту: {note} (пример: E4, C#3, Bb1)")
     semi = NOTES[m[1].upper()] + {"#": 1, "b": -1, "": 0}[m[2]]
-    midi = 12 * (int(m[3]) + 1) + semi
-    return 440 * 2 ** ((midi - 69) / 12)
+    return 12 * (int(m[3]) + 1) + semi
+
+
+def note_hz(note):
+    return 440 * 2 ** ((note_midi(note) - 69) / 12)
 
 
 def parse_gauge(g):
@@ -287,6 +292,165 @@ def svg(args):
     print("Печатать в масштабе 100% (без «подогнать по размеру»), склеить по красным линиям.")
 
 
+NOTES_BY_PC = "C C# D Eb E F F# G Ab A Bb B".split()
+DEGREE = {2: 2, 4: 5, 6: 9, 7: 10, 9: 2, 11: 5, 13: 9}
+NATURAL = {"3": 4, "5": 7, "7": 11, "6": 9, "9": 2, "11": 5, "13": 9, "2": 2, "4": 5}
+
+
+def pitch_class(name):
+    return (NOTES[name[0]] + {"#": 1, "b": -1}.get(name[1:], 0)) % 12
+
+
+def parse_chord(sym):
+    """Аккорд -> (тоника, бас, {ступень: полутоны от тоники}, необязательные ступени)."""
+    m = re.fullmatch(r"([A-G][#b]?)(.*?)(?:/([A-G][#b]?))?", sym.strip())
+    if not m:
+        raise SystemExit(f"Не понял аккорд: {sym} (пример: Am, C7, Abm7+9, F#m7b5, G/B)")
+    root, rest, bass = m[1], m[2], m[3] or m[1]
+    t = {"1": 0, "3": 4, "5": 7}
+    optional = set()
+
+    def take(pattern):
+        nonlocal rest
+        mm = re.match(pattern, rest)
+        if mm:
+            rest = rest[mm.end():]
+        return mm
+
+    n = None
+    if mm := take(r"(?:maj|ma|M|Δ)(7|9|11|13)?"):
+        t["7"], n = 11, mm[1] or "7"
+    elif take(r"ø7?"):
+        t.update({"3": 3, "5": 6, "7": 10})
+    elif take(r"(?:dim|°|o)7"):
+        t.update({"3": 3, "5": 6, "7": 9})
+    elif take(r"dim|°|o"):
+        t.update({"3": 3, "5": 6})
+    elif take(r"aug|\+(?!\d)"):
+        t["5"] = 8
+    elif take(r"min|m(?!aj)|-(?!\d)"):
+        t["3"] = 3
+        if mm := take(r"(?:maj|ma|M|Δ)(7|9|11|13)?"):
+            t["7"], n = 11, mm[1] or "7"
+    if n is None and (mm := take(r"6/9|69|13|11|9|7|6|5")):
+        n = mm[0]
+    if n == "5":
+        del t["3"]
+    elif n in ("6", "6/9", "69"):
+        t["6"] = 9
+        if n != "6":
+            t["9"] = 2
+    elif n:
+        t.setdefault("7", 10)
+        if int(n) >= 9:
+            t["9"] = 2
+        if n == "11":
+            t["11"] = 5
+        if n == "13":
+            t["13"] = 9
+        if int(n) >= 11:
+            optional.add("9")
+    while rest:
+        if take(r"[(),\s]"):
+            continue
+        if mm := take(r"sus([24]?)"):
+            t.pop("3", None)
+            d = mm[1] or "4"
+            t[d] = DEGREE[int(d)]
+        elif mm := take(r"(?:add|\+)(\d+)"):
+            d = int(mm[1])
+            if d == 5:
+                t["5"] = 8
+            elif d in DEGREE:
+                t[str(d)] = DEGREE[d]
+            else:
+                raise SystemExit(f"Не понял ступень {d} в аккорде {sym}")
+        elif mm := take(r"(#|b|-)(5|9|11|13)"):
+            d = mm[2]
+            t[d] = NATURAL[d] + (1 if mm[1] == "#" else -1)
+        elif mm := take(r"(?:no|omit)(\d)"):
+            t.pop(mm[1], None)
+        else:
+            raise SystemExit(f"Не понял часть «{rest}» в аккорде {sym}")
+    if t.get("5") == 7 and len(t) >= 4:
+        optional.add("5")
+    return root, bass, t, optional
+
+
+def interval_label(degree, semi):
+    if degree == "1":
+        return "1"
+    if degree == "7" and semi == 9:
+        return "bb7"
+    return {-1: "b", 1: "#", 0: ""}[(semi - NATURAL[degree] + 6) % 12 - 6] + degree
+
+
+def spell(root, degree, semi):
+    """Имя ноты по ступени: буква отсчитывается от тоники (Abm -> Ab Cb Eb)."""
+    letters = "CDEFGAB"
+    letter = letters[(letters.index(root[0]) + int(degree) - 1) % 7]
+    diff = (pitch_class(root) + semi - NOTES[letter] + 6) % 12 - 6
+    if abs(diff) == 2:  # дубль-диез/бемоль упрощаем: E7#9 -> G, а не F##
+        return NOTES_BY_PC[(pitch_class(root) + semi) % 12]
+    return letter + {-1: "b", 0: "", 1: "#"}[diff]
+
+
+def voicings(open_midi, root_pc, bass_pc, tones, optional, max_fret=15, span=4):
+    """Перебор аппликатур в окне span ладов (+ открытые струны); лучшая на каждую позицию."""
+    pcs = {(root_pc + v) % 12 for v in tones.values()}
+    required = {(root_pc + v) % 12 for d, v in tones.items() if d not in optional}
+    best = {}
+    for pos in range(0, max_fret - span + 2):
+        window = [0] + list(range(max(pos, 1), pos + span))
+        opts = [[None] + [f for f in window if (o + f) % 12 in pcs] for o in open_midi]
+        for v in itertools.product(*opts):
+            sound = [(o + f, i) for i, (o, f) in enumerate(zip(open_midi, v)) if f is not None]
+            if len(sound) < min(len(open_midi), max(3, len(required))):
+                continue
+            got = {m % 12 for m, _ in sound}
+            if not required <= got or min(sound)[0] % 12 != bass_pc:
+                continue
+            fretted = [f for f in v if f]
+            low = min(fretted, default=0)
+            if fretted and max(fretted) - low >= span:
+                continue
+            fingers = len(fretted)
+            at_low = [i for i, f in enumerate(v) if f and f == low]
+            if len(at_low) > 1 and 0 not in v[min(at_low):max(at_low) + 1]:
+                fingers -= len(at_low) - 1  # барре
+            if fingers > 4 or (0 in v and max(fretted, default=0) > 5):  # открытые — только у порожка
+                continue
+            idx = [i for _, i in sound]
+            gaps = sum(1 for i in range(min(idx), max(idx)) if v[i] is None)
+            score = (len(sound) - 1.5 * gaps - 0.5 * (len(open_midi) - len(sound)) + v.count(0) - 0.5 * fingers
+                     - 0.4 * low - 0.75 * (max(fretted, default=0) - low) + 0.5 * len(got))
+            key = "open" if 0 in v else low  # из открытых — только лучшая
+            if score > best.get(key, (-99, None))[0]:
+                best[key] = (score, v)
+    return [v for _, v in sorted(best.values(), key=lambda sv: -sv[0])]
+
+
+def chord(args):
+    tuning = args.tuning.split() if args.tuning else STANDARD[:6]
+    open_midi = [note_midi(n) for n in tuning]
+    root, bass, tones, optional = parse_chord(args.chord)
+    rpc, bpc = pitch_class(root), pitch_class(bass)
+    order = sorted(tones.items(), key=lambda dv: int(dv[0]))
+    print(f"{args.chord}: " + "  ".join(
+        f"{spell(root, d, v)}({interval_label(d, v)}{'?' if d in optional else ''})" for d, v in order))
+    vs = voicings(open_midi, rpc, bpc, tones, optional)[:args.count]
+    if not vs:
+        raise SystemExit("Удобной аппликатуры в 4 ладах не нашлось")
+    compact = ["-".join("x" if f is None else str(f) for f in reversed(v)) for v in vs]
+    w = max(8, max(map(len, compact)) + 2)
+    print("   " + "".join(f"{'откр.' if 0 in v else min(f for f in v if f)!s:^{w}}" for v in vs))
+    for i, n in enumerate(tuning):
+        lab = n[:-1].upper() if i == len(tuning) - 1 else n[:-1].lower()
+        print(f"{lab:>2}|" + "".join(f"{'x' if v[i] is None else v[i]!s:-^{w - 1}}|" for v in vs))
+    print("   " + "".join(f"{c:^{w}}" for c in compact))
+    print("Сверху — позиция (нижний лад), снизу — запись от басовой струны." + (" ? — ступень можно опустить." if optional else ""))
+
+
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 sub = p.add_subparsers(required=True)
 
@@ -337,6 +501,12 @@ s.add_argument("--tail", type=float, default=6, help="накладка за по
 s.add_argument("--a4", action="store_true", help="разбить на листы A4 для склейки")
 s.add_argument("-o", "--out", default="fretboard.svg")
 s.set_defaults(fn=svg)
+
+c = sub.add_parser("chord", help="аппликатуры аккорда")
+c.add_argument("chord", help="Am, C7, Abm7+9, F#m7b5, Cmaj9, G/B, Dsus4, E7#9")
+c.add_argument("--count", type=int, default=4, help="сколько вариантов показать")
+c.add_argument("--tuning", help="строй от 1-й струны (по умолчанию E-standard)")
+c.set_defaults(fn=chord)
 
 a = p.parse_args()
 a.fn(a)
